@@ -17,6 +17,26 @@
      * Storage: 200 GB SSD (NVMe preferred)
 + CLI Tools: `git,` `cargo,` `docker,` `docker-compose,` `just,` `nvidia-container-toolkit`
 
+--------------------
+## ⚠️ Choose Where to Run: Cloud vs Local
+### You can either:
+
+### A. Use a Cloud Platform
+* Use platforms like [Vast.ai](https://cloud.vast.ai/?ref_id=62897&creator_id=62897&name=Ubuntu%2022.04%20VM) (so far works great since it has a Ubuntu 22 VM not pytouch, docker template) 
+    + Ideal if you don’t have local access to high-end hardware.
+    + Make sure to expose Docker and allow GPU access.
+
+### B. Use Your Local PC
+* Best if you have a powerful machine (e.g., Alienware M18, desktop with 4090).
+  + You get full control and better performance predictability.
+  + Install Docker, NVIDIA drivers, and run broker directly from your terminal.
+
+### Recommendation: If you’re using a physical PC with enough VRAM (16GB+), local is often faster and more stable.
+---------------------
+
+
+
+
 ## Install Perequisites 
 ```
 sudo apt update && sudo apt upgrade -y
@@ -40,6 +60,7 @@ sudo apt install -y \
 
 ```
 sudo apt update && sudo apt install -y pkg-config libssl-dev
+sudo apt-get update -qq && sudo apt-get install -y -q clang
 ```
 
 
@@ -90,6 +111,46 @@ rzup --version
 rzup install
 ```
 ![image](https://github.com/user-attachments/assets/6ae364cb-b431-4071-9cc9-7cb978af73c1)
+
+
+## Check if `nvidia-smi` is installed
+```
+nvidia-smi
+```
++ If command not found,
+```
+sudo apt update
+sudo apt install -y nvidia-driver-550 nvidia-dkms-550
+```
++ Now Reboot
+```
+reboot
+```
+
++ Run `nvidia-smi` again
+  ### You should see below picture
+```
+nvidia-smi
+```
+![image](https://github.com/user-attachments/assets/83c5e3ec-9f36-433a-9dcf-596c26d4193a)
+
+
+### Install Nvidia Container Toolkit for docker 
+```
+sudo apt install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+### Check if Docker can use GPU 
+```
+docker run --rm --gpus all nvidia/cuda:12.3.0-base-ubuntu22.04 nvidia-smi
+```
+- It should print your GPU info from inside the container.
+
+
+
+
+
 
 ---------------
 ## Install bento 
@@ -185,7 +246,7 @@ RUST_LOG=info bento_cli -c 32
 ## OPTION 2 {IF YOU SKIP THE ABOVE `Base Mainnet` and `Base Testnet`] 
   ### Since we're working on Sepolia here, we'll run the predefined settings to Automatically load the below settings 
   ```
-  source .env.eth-sepolia
+source .env.eth-sepolia
   ```
 
 ### Edit config with below code
@@ -222,12 +283,128 @@ boundless account deposit-stake 10
 `I deposited 10 USDC here because the faucet dripped me 10 only, will try to refill after an hour` 
 ![image](https://github.com/user-attachments/assets/0bc86e51-f486-4ec0-8d8d-3c4d0bd9ab00)
 
+-----------------
+
+## Install `nvtop` and `htop` 
+```
+sudo apt update && sudo apt install -y nvtop htop
+```
+
++ `nvtop` is used to Monitor GPU Usage
++ `htop` is used to Monitor CPU cores, RAMs, processes usage
+-----------
+
+
+## Multi-GPU Setup (if thats your SETUP)
+### Check GPU with this code 
+```
+nvidia-smi -L
+```
+![image](https://github.com/user-attachments/assets/f2e1248e-2832-48d7-bfd5-2c3ffc1c836f)
+
+
+*  ## Step 1: Configure `compose.yml` for Each GPU if more than one
+### You must define a separate `gpu_agent` container for each GPU device. Use device_ids to target GPU 0(first GPU), 1(second GPU), 2(third GPU), etc.
+---------------------
+
+```
+
+```
+
+
+
+
+
+
+
+
+
+
 
 -----------------
 ## Start Broker 
 ```
 just broker
 ```
+
+## View LOGS, stop BROKER & Remove Data 
+```
+just broker logs  # View logs
+just broker down  # Stop broker
+just broker clean  # Remove all data/volumes
+```
+
+
+-------------------------
+
+# Performance Optimization & Segment Size Benchmarking
+
+
+
+```
+lscpu
+```
+
+--------------
+# Twerking `SEGMENT_SIZE` 
++  `SEGMENT_SIZE` controls how large each proving segment is.
++ The larger the `SEGMENT_SIZE` the more efficient the proof (fewer segments to manage) but it requires more VRAM. \
+
+### How `SEGMENT_SIZE` works 
++ The CPU runs a pre-flight of the program and splits it into segments.
++ Each segment is sent to a GPU worker for proving.
++ Larger segments = fewer proofs = faster overall proving = more VRAM required.
+
+![CatDanceDancingCatGIF](https://github.com/user-attachments/assets/44b80fe9-be90-45ca-a4e5-e0860635f88d)
+
+### Recommended `SEGMENT` by `VRAM` 
+
+| **GPU VRAM** | **Max SEGMENT_SIZE** | **Notes**                              |
+|--------------|-----------------------|----------------------------------------|
+| 8 GB         | `19`                  | Entry-level proving performance        |
+| 16 GB        | `20`                  | Good balance for consumer GPUs (e.g. 3090, 4060) |
+| 20 GB        | `21`                  | For cards like A4500, RTX 5000         |
+| 40 GB        | `22`                  | A6000, 4090, H100 and data center GPUs |
+
+------
+## Benchmarking a Single GPU
+
+* Set `.env.broker`
+```
+nano .env.broker
+```
+- Set `SEGMENT_SIZE=20` depnding on GPU RAM     
+*  In `compose.yaml` use just one GPU (default)
+*  Restart `broker`
+```
+just broker down
+just broker
+```
+*  Run Test
+```
+RUST_LOG=info bento_cli -c 4096
+```
+*  Check LOGS
+```
+docker logs bento-gpu_prove_agent0-1
+```
+### If you see something like `OutOfMemory at risc0-zkp...` you will need to reduce `SEGMENT_SIZE` 
+
+
+## Benchmarking Multiple GPUs 
+### List GPUs
+```
+nvidia-smi -L
+```
+* In `compose.yml,` duplicate the `gpu_agent` section based on the numbers of GPUs where first GPU = 0 and fourth GPU = 3
+  ### Here is a preconfigured 4 GPU count `compose` which i also updated the `broker` services `depend_on`
+  ### We are gonna swap the old `compose.yml` to the preconfigued one
+  ```
+cd $HOME && cd boundless
+mv compose.yml backupcompose.yml
+curl -L https://raw.githubusercontent.com/mztacat/Boundless-Simplified-Guide/main/compose.yml -o compose.yml
+  ```
+* 
 
 
 
