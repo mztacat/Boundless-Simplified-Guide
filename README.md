@@ -274,7 +274,7 @@ nano .env.eth-sepolia
 ### You need to deposit USDC (Sepolia testnet version) to activate your prover. This stake is required to start receiving proving jobs. 
 
 ```
- source .env.eth-sepolia
+source .env.eth-sepolia
 ```
 
 ```
@@ -294,6 +294,29 @@ sudo apt update && sudo apt install -y nvtop htop
 + `htop` is used to Monitor CPU cores, RAMs, processes usage
 -----------
 
+## Benchmarking a Single GPU
+
+* Set `.env.broker`
+```
+nano .env.broker
+```
+- Set `SEGMENT_SIZE=20` depnding on GPU RAM     
+*  In `compose.yaml` use just one GPU (default)
+*  Restart `broker`
+```
+just broker down
+just broker
+```
+*  Run Test
+```
+RUST_LOG=info bento_cli -c 4096
+```
+*  Check LOGS
+```
+docker logs bento-gpu_prove_agent0-1
+```
+### If you see something like `OutOfMemory at risc0-zkp...` you will need to reduce `SEGMENT_SIZE` 
+
 
 ## Multi-GPU Setup (if thats your SETUP)
 ### Check GPU with this code 
@@ -307,21 +330,19 @@ nvidia-smi -L
 ### You must define a separate `gpu_agent` container for each GPU device. Use device_ids to target GPU 0(first GPU), 1(second GPU), 2(third GPU), etc.
 ---------------------
 
+* In `compose.yml,` duplicate the `gpu_agent` section based on the numbers of GPUs where first GPU = 0 and fourth GPU = 3
+  ### Here is a preconfigured 4 GPU count `compose` which i also updated the `broker` services `depend_on`
+  ### We are gonna swap the old `compose.yml` to the preconfigued one
+  
 ```
-
+cd $HOME && cd boundless
+mv compose.yml backupcompose.yml
+curl -L https://raw.githubusercontent.com/mztacat/Boundless-Simplified-Guide/main/compose.yml -o compose.yml
 ```
-
-
-
-
-
-
-
-
-
-
 
 -----------------
+
+
 ## Start Broker 
 ```
 just broker
@@ -367,50 +388,49 @@ lscpu
 | 40 GB        | `22`                  | A6000, 4090, H100 and data center GPUs |
 
 ------
-## Benchmarking a Single GPU
 
-* Set `.env.broker`
+## RAM and CPU Tuning 
+### Edit `compose.yml` to allocate CPU cores and Memory Usage 
+
++ Locate `cpus : 4
++ mem_limit: 4G  #where 4G is the memory to use
+----
+### 💡Tips for Tuning Based on your system 
+
+| System RAM | # Cores | Suggested Config                                     |
+| ---------- | ------- | ---------------------------------------------------- |
+| 32 GB      | 16      | 4 GPU agents @ 4G/4 cores,   |
+| 16 GB      | 8       | 2 GPU agents max @ 4G/4
+| 64+ GB     | 24+     | 4+ GPU agents
+
+----------------
+## Taking a look into `broker.toml` and adjusting for good performance 
 ```
-nano .env.broker
+nano broker.toml
 ```
-- Set `SEGMENT_SIZE=20` depnding on GPU RAM     
-*  In `compose.yaml` use just one GPU (default)
-*  Restart `broker`
-```
-just broker down
-just broker
-```
-*  Run Test
-```
-RUST_LOG=info bento_cli -c 4096
-```
-*  Check LOGS
-```
-docker logs bento-gpu_prove_agent0-1
-```
-### If you see something like `OutOfMemory at risc0-zkp...` you will need to reduce `SEGMENT_SIZE` 
+
+# The broker.toml file configures the Boundless broker, which acts as a controller for:
+* Market bidding logic
+* Prover scheduling
+* Capacity control (based on CPU/GPU)
 
 
-## Benchmarking Multiple GPUs 
-### List GPUs
-```
-nvidia-smi -L
-```
-* In `compose.yml,` duplicate the `gpu_agent` section based on the numbers of GPUs where first GPU = 0 and fourth GPU = 3
-  ### Here is a preconfigured 4 GPU count `compose` which i also updated the `broker` services `depend_on`
-  ### We are gonna swap the old `compose.yml` to the preconfigued one
-  ```
-cd $HOME && cd boundless
-mv compose.yml backupcompose.yml
-curl -L https://raw.githubusercontent.com/mztacat/Boundless-Simplified-Guide/main/compose.yml -o compose.yml
-  ```
-* 
+| Key                                 | Meaning                                                              | Example / Notes                    |
+| ----------------------------------- | -------------------------------------------------------------------- | ---------------------------------- |
+| `mcycle_price`                      | Price per mega-cycle (1M cycles) in native token (e.g. ETH)          | `"0.0000005"`                      |
+| `mcycle_price_stake_token`          | Price per mega-cycle if user pays with staking token                 | `"0.0001"`                         |
+| `peak_prove_khz`                    | Used for job scheduling; set based on benchmark speed of your prover | `100` (means \~100k cycles/sec)    |
+| `max_mcycle_limit`                  | Reject requests requiring too much compute                           | e.g. `8000` (8 billion cycles)     |
+| `max_journal_bytes`                 | Size cap on proof output journal                                     | Prevents oversized on-chain data   |
+| `min_deadline`                      | Seconds before deadline to ignore job                                | Skip if deadline too close         |
+| `max_concurrent_proofs`             | Max simultaneous proving tasks                                       | Set to number of GPUs or CPU cores |
 
 
+### Where the `peak_prove_khz = 1400` because I use a `4x 4090s @ ~350kHz` each = total proving capacity estimate
+### My `max_concurrent_proofs = 4` which signifies my numbers of GPUs
+---------
 
 
-
-
-
-
+# Thats all for now, will update as I keep twerking and discovering! 
+# A long RIDE! 
 
