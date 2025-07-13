@@ -68,7 +68,7 @@ sudo apt-get update -qq && sudo apt-get install -y -q clang
 ```
 git clone https://github.com/boundless-xyz/boundless
 cd boundless
-git checkout release-0.12
+git checkout release-0.11
 ````
 
 ## Install Dependencies like Docer, Nvidia Container with this:
